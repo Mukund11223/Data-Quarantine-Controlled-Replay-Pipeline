@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+env/
+.env
+
+# DuckDB database files
+data/*.duckdb
+data/*.duckdb-wal
+
+# Generated CSV test/benchmark files
+data/test_*.csv
+data/benchmark_*.csv
+data/sample_orders.csv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
