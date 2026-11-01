@@ -1,8 +1,8 @@
 import json
 import uuid
 from datetime import datetime, timezone
-from db import get_connection
-from validator import validate_record
+from .db import get_connection
+from .validator import validate_record
 
 def get_utc_now():
     return datetime.now(timezone.utc).replace(tzinfo=None)

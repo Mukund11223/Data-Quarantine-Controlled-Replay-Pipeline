@@ -1,7 +1,7 @@
 import time
-from generator import generate_synthetic_data
-from pipeline import run_pipeline
-from reconcile import run_reconciliation
+from .generator import generate_synthetic_data
+from .pipeline import run_pipeline
+from .reconcile import run_reconciliation
 
 def run_benchmark(num_records: int = 100000):
     print(f"=== STARTING PERFORMANCE BENCHMARK ({num_records:,} records) ===")

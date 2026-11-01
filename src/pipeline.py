@@ -3,8 +3,8 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from db import get_connection
-from validator import validate_record
+from .db import get_connection
+from .validator import validate_record
 
 
 def get_utc_now():

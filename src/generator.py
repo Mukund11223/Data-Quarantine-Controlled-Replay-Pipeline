@@ -4,7 +4,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import duckdb
-from db import get_connection
+from .db import get_connection
 
 SUPPORTED_CURRENCIES = ["USD", "EUR", "GBP", "CAD", "JPY"]
 PAYMENT_METHODS = ["CREDIT_CARD", "PAYPAL", "BANK_TRANSFER", "CRYPTO"]

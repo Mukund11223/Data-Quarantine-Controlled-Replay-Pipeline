@@ -52,6 +52,117 @@ A production-grade, serverless Data Engineering solution built with **Python** a
 
 ---
 
+## Data Warehouse Visual Schema
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│                          YOTTAFLEX DATA WAREHOUSE SCHEMA                                    │
+├─────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                             │
+│  ┌─────────────────────┐       ┌────────────────────────────────────────────────────────┐  │
+│  │   dim_customers     │       │                    fact_orders                          │  │
+│  │  (Reference Dim)    │       │              (Target Analytical Table)                  │  │
+│  ├─────────────────────┤       ├────────────────────────────────────────────────────────┤  │
+│  │ PK  customer_id     │◄──────│ FK  customer_id                                        │  │
+│  │     customer_name   │       │ PK  order_id                                           │  │
+│  │     account_status  │       │     order_date      TIMESTAMP                          │  │
+│  │     created_at      │       │     total_amount    DECIMAL(12,2)  > 0                 │  │
+│  │                     │       │     currency        VARCHAR(3)  ∈ {USD,EUR,GBP,CAD,JPY} │  │
+│  │  ┌───────────────┐  │       │     payment_method  VARCHAR ∈ {CC,PP,BT,CRYPTO}        │  │
+│  │  │ ACCOUNT STATUS│  │       │     status          VARCHAR ∈ {COMPLETED,PENDING,CANC} │  │
+│  │  │ ACTIVE        │  │       │     ingestion_run_id  VARCHAR  (Lineage)               │  │
+│  │  │ SUSPENDED     │  │       │     ingested_at       TIMESTAMP                        │  │
+│  │  │ CLOSED        │  │       └────────────────────────────────────────────────────────┘  │
+│  │  └───────────────┘  │                                        │                          │
+│  └─────────────────────┘                                        │                          │
+│                                                                 │                          │
+│  ┌─────────────────────────────────────────────────────────────▼────────────────────────┐  │
+│  │                           quarantine_orders                                            │  │
+│  │                      (Failure Context Store)                                          │  │
+│  ├───────────────────────────────────────────────────────────────────────────────────────┤  │
+│  │ PK  quarantine_id     VARCHAR  (Deterministic UUID)                                   │  │
+│  │     original_order_id   VARCHAR  (NULL if missing in payload)                         │  │
+│  │     raw_payload         VARCHAR  (JSON - exact source record)                         │  │
+│  │     error_codes         VARCHAR  (JSON Array - e.g. ["ERR_NEGATIVE_AMOUNT"])          │  │
+│  │     error_messages      VARCHAR  (JSON Array - Human readable explanations)           │  │
+│  │     failed_check_stage  VARCHAR  ∈ {SCHEMA_VALIDATION, UNIQUENESS_CHECK,              │  │
+│  │                                                   BUSINESS_RULE, REFERENTIAL_INTEGRITY}│  │
+│  │     source_file         VARCHAR  (Originating file path)                              │  │
+│  │     run_id              VARCHAR  (Ingestion run lineage)                              │  │
+│  │     replay_status       VARCHAR  ∈ {PENDING, REPLAYED, DISCARDED}  DEFAULT 'PENDING'  │  │
+│  │     replay_run_id       VARCHAR  (Run ID that successfully replayed)                  │  │
+│  │     created_at          TIMESTAMP                                                       │  │
+│  │     updated_at          TIMESTAMP                                                       │  │
+│  └───────────────────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                             │
+│  ┌────────────────────────────────────────────────────────────────────────────────────────┐  │
+│  │                           pipeline_runs                                                 │  │
+│  │                      (Audit & Observability Log)                                        │  │
+│  ├────────────────────────────────────────────────────────────────────────────────────────┤  │
+│  │ PK  run_id              VARCHAR  (Unique run identifier)                                │  │
+│  │     run_type            VARCHAR  ∈ {STANDARD_INGEST, CONTROLLED_REPLAY}                │  │
+│  │     status              VARCHAR  ∈ {IN_PROGRESS, SUCCESS, PARTIAL_SUCCESS, FAILED}     │  │
+│  │     start_time          TIMESTAMP                                                       │  │
+│  │     end_time            TIMESTAMP  (NULL if in progress)                                │  │
+│  │     records_read        INTEGER                                                         │  │
+│  │     records_valid       INTEGER                                                         │  │
+│  │     records_quarantined INTEGER                                                         │  │
+│  │     records_replayed    INTEGER                                                         │  │
+│  │     error_summary       VARCHAR  (Error details if FAILED)                              │  │
+│  └────────────────────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                             │
+└─────────────────────────────────────────────────────────────────────────────────────────────┘
+
+ENTITY RELATIONSHIP DIAGRAM:
+
+  dim_customers (1) ──────< (N) fact_orders
+       │
+       │  (Validated via FK in ingestion)
+       ▼
+  quarantine_orders (N) ──► (Replay) ──► fact_orders
+       │
+       │  (Tracks lineage via run_id)
+       ▼
+  pipeline_runs (1) ──────< (N) fact_orders
+       │
+       └──────< (N) quarantine_orders
+
+VALIDATION FLOW STAGES (per record):
+
+  ┌──────────────────┐
+  │  Stage 1         │ ──► ERR_MISSING_* ──► SCHEMA_VALIDATION ──► Quarantine
+  │  Schema &        │
+  │  Required Fields │
+  └────────┬─────────┘
+           │ Pass
+           ▼
+  ┌──────────────────┐
+  │  Stage 2         │ ──► ERR_MALFORMED_* ──► SCHEMA_VALIDATION ──► Quarantine
+  │  Type & Format   │      ERR_DUPLICATE_KEY ──► UNIQUENESS_CHECK ──► Quarantine
+  │  + Batch Dup     │      ERR_FUTURE_TIMESTAMP ──► SCHEMA_VALIDATION ──► Quarantine
+  └────────┬─────────┘
+           │ Pass
+           ▼
+  ┌──────────────────┐
+  │  Stage 3         │ ──► ERR_NEGATIVE_AMOUNT ──► BUSINESS_RULE ──► Quarantine
+  │  Business Rules  │      ERR_UNSUPPORTED_CURRENCY ──► BUSINESS_RULE ──► Quarantine
+  └────────┬─────────┘
+           │ Pass
+           ▼
+  ┌──────────────────┐
+  │  Stage 4         │ ──► ERR_INVALID_CUSTOMER ──► REFERENTIAL_INTEGRITY ──► Quarantine
+  │  Referential &   │      ERR_INACTIVE_CUSTOMER ──► REFERENTIAL_INTEGRITY ──► Quarantine
+  │  State Integrity │
+  └────────┬─────────┘
+           │ Pass
+           ▼
+  ┌──────────────────┐
+  │   VALID RECORD   │ ──► UPSERT into fact_orders (Idempotent MERGE)
+  └──────────────────┘
+```
+
+---
+
 ## Tech Stack
 
 - **Python (3.10+)** — Core orchestration, validation logic, and CLI.
@@ -95,7 +206,13 @@ A production-grade, serverless Data Engineering solution built with **Python** a
 
 ## Setup & Quick Start
 
-1. **Clone and Setup Virtual Environment:**
+1. **Clone the Repository:**
+   ```bash
+   git clone <repository-url>
+   cd yottaflex
+   ```
+
+2. **Setup Virtual Environment:**
    ```bash
    python3 -m venv venv
    source venv/bin/activate
@@ -136,6 +253,69 @@ A production-grade, serverless Data Engineering solution built with **Python** a
    ```bash
    pytest -v
    ```
+
+---
+
+## Audit & Reconciliation Queries
+
+Use the following Python terminal commands to inspect the database for audit purposes:
+
+### 1. Pipeline Health Audit
+```bash
+python3 -c "
+import duckdb
+conn = duckdb.connect('data/pipeline.duckdb')
+for r in conn.execute('SELECT run_id, run_type, status, records_read, records_valid, records_quarantined FROM pipeline_runs').fetchall():
+    print(f'Run ID: {r[0]} | Type: {r[1]} | Status: {r[2]} | Read: {r[3]} | Valid: {r[4]} | Quarantined: {r[5]}')
+conn.close()
+"
+```
+
+### 2. Data Integrity & Reconciliation
+```bash
+python3 -c "
+import duckdb
+conn = duckdb.connect('data/pipeline.duckdb')
+res = conn.execute('''
+    SELECT 
+        (SELECT SUM(records_read) FROM pipeline_runs) AS total_ingested,
+        (SELECT COUNT(*) FROM fact_orders) AS total_fact_valid,
+        (SELECT COUNT(*) FROM quarantine_orders WHERE replay_status = 'PENDING') AS pending_quarantine,
+        (SELECT COUNT(*) FROM quarantine_orders WHERE replay_status = 'REPLAYED') AS total_replayed
+''').fetchone()
+print(f'Total Ingested      : {res[0]}')
+print(f'Total Valid (Fact)  : {res[1]}')
+print(f'Pending Quarantine  : {res[2]}')
+print(f'Successfully Replayed: {res[3]}')
+conn.close()
+"
+```
+
+### 3. Inspect Valid Records (Fact Table)
+```bash
+python3 -c "
+import duckdb
+conn = duckdb.connect('data/pipeline.duckdb')
+print(f'%-12s | %-12s | %-10s | %-10s' % ('Order ID', 'Customer ID', 'Amount', 'Status'))
+print('-'*50)
+for r in conn.execute('SELECT order_id, customer_id, total_amount, status FROM fact_orders LIMIT 5').fetchall():
+    print(f'%-12s | %-12s | %-10s | %-10s' % (r[0], r[1], r[2], r[3]))
+conn.close()
+"
+```
+
+### 4. Inspect Quarantined Records
+```bash
+python3 -c "
+import duckdb
+conn = duckdb.connect('data/pipeline.duckdb')
+print(f'%-35s | %-12s | %-15s | %-10s' % ('Quarantine ID', 'Order ID', 'Stage', 'Status'))
+print('-'*85)
+for r in conn.execute('SELECT quarantine_id, original_order_id, failed_check_stage, replay_status FROM quarantine_orders LIMIT 5').fetchall():
+    print(f'%-35s | %-12s | %-15s | %-10s' % (r[0], r[1], r[2], r[3]))
+conn.close()
+"
+```
 
 ---
 

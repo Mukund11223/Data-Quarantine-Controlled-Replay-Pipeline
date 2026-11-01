@@ -1,10 +1,10 @@
 import argparse
-from db import init_db
-from generator import generate_synthetic_data
-from pipeline import run_pipeline
-from replay import run_replay
-from reconcile import run_reconciliation
-from benchmark import run_benchmark
+from .db import init_db
+from .generator import generate_synthetic_data
+from .pipeline import run_pipeline
+from .replay import run_replay
+from .reconcile import run_reconciliation
+from .benchmark import run_benchmark
 
 def main():
     parser = argparse.ArgumentParser(description="Data Quarantine & Controlled Replay Pipeline CLI")
